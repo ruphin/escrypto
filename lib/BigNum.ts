@@ -3,35 +3,66 @@ class FormatError extends Error {}
 class OverflowError extends Error {}
 const BIG_ENDIAN = false;
 
-export class Uint {
-  constructor(param) {
-    switch (typeof param) {
-      case 'string':
-        this.buffer = fromHex(param);
-        break;
-      case 'number':
-        this.buffer = fromNumber(param);
-        break;
-      case 'object':
-        if (param instanceof ArrayBuffer) {
-          this.buffer = param;
-        } else {
-          throw `invalid constructor argument: ${param}`;
-        }
-        break;
-      default:
-        throw `invalid constructor argument: ${param}`;
+type Endianness = 'le' | 'be';
+type Sign = 'pos' | 'neg';
+
+export class BigNum {
+  sign: Sign;
+  buffer: ArrayBuffer;
+  endian: Endianness;
+
+  constructor(number: number | string | ArrayBuffer, base: number = 16, endian: Endianness = 'le') {
+    if (number instanceof ArrayBuffer) {
+      this.buffer = number;
+    } else if (typeof number === 'number') {
+      [this.buffer, this.sign] = BigNum.fromNumber(number);
+    } else if (typeof number === 'string') {
+      [this.buffer, this.sign] = BigNum.fromString(number, base);
+    } else {
+      throw `invalid constructor argument: ${number}`;
     }
+    this.endian = endian;
   }
 
   // Serialize instances of this class as '[object Uint]'
   get [Symbol.toStringTag]() {
-    return 'Uint';
+    return 'BigNum';
   }
 
   static fromUTF(string) {
     return new Uint(fromUTF(string));
   }
+
+  static fromString = (numberString: string, base: number = 10, endian: Endianness = 'le'): BigNum => {
+    let sign: Sign = 'pos';
+    if (base !== 16) {
+      throw 'Only base 16 strings supported for now';
+    }
+    if (numberString[0] === '-') {
+      sign = 'neg';
+    }
+    // To be a valid hex string that encodes to bytes it must:
+    //   Contain only characters [0-9a-fA-F]
+    if (numberString.match(/[^0-9a-fA-F]/)) {
+      throw new FormatError(`${numberString} is not a valid number string`);
+    }
+    // If the hex string is uneven length, pad it with a 0
+    if (numberString.length & 1) {
+      numberString = '0' + numberString;
+    }
+    // Split the hex string into character pairs. Each character pair represents one byte.
+    const buffer = Uint8Array.from(numberString.match(/../g).map(charPair => Number.parseInt(charPair, 16))).buffer;
+
+    return new BigNum(buffer);
+    return [buffer, sign];
+  };
+
+  static fromNumber = (number: number) => {
+    if (number < Number.MIN_SAFE_INTEGER || number > Number.MAX_SAFE_INTEGER) {
+      throw 'Number outside safe integer bounds';
+    }
+    return BigNum.fromString(number.toString(16), 16);
+  };
 
   add(other) {
     return new Uint(add(this.buffer, other.buffer));
@@ -59,35 +90,27 @@ export class Uint {
     return toHex(this.buffer);
   }
 
-  get string() {
-    return toString(this.buffer);
+  get utf() {
+    return toUTF(this.buffer);
   }
-}
 
-export const fromHex = hex => {
-  // To be a valid hex string that encodes to bytes it must:
-  //   Contain only characters [0-9a-fA-F]
-  if (hex.match(/[^0-9a-fA-F]/)) {
-    throw new FormatError(`${hex} is not a valid hex string`);
-  }
-  // If the hex string is uneven length, pad it with a 0
-  if (hex.length & 1) {
-    hex = '0' + hex;
-  }
-  // Split the hex string into character pairs. Each character pair represents one byte.
-  return Uint8Array.from(hex.match(/../g), charPair => Number.parseInt(charPair, 16)).buffer;
-};
+  bitLength(): number;
+  zeroBits(): number;
+  byteLength(): number;
+  isNeg(): boolean;
+  isEven(): boolean;
+  isOdd(): boolean;
+  isZero(): boolean;
+  cmp(b: any): number;
+  lt(b: any): boolean;
+  lte(b: any): boolean;
+  gt(b: any): boolean;
+  gte(b: any): boolean;
+  eq(b: any): boolean;
+}
 
 export const toHex = buffer => {
   return Array.from(new Uint8Array(buffer), num => `0${num.toString(16)}`.slice(-2)).join('') || '0';
-};
-
-// Warning: Numbers above Number.MAX_SAFE_INT
-export const fromNumber = number => {
-  if (number > Number.MAX_SAFE_INTEGER) {
-    throw 'Number too large';
-  }
-  return fromHex(number.toString(16));
 };
 
 export const toBinary = buffer => {
@@ -116,7 +139,7 @@ export const toUTF = buffer => {
 
 // Pad `buffer` to a multiple of `n` bytes
 const padToNBytes = (buffer, n) => {
-  let underLength = (n - buffer.byteLength % n) % n;
+  let underLength = (n - (buffer.byteLength % n)) % n;
   if (underLength !== 0) {
     const tmp = new Uint8Array(buffer.byteLength + underLength);
     tmp.set(new Uint8Array(buffer), underLength);
@@ -420,7 +443,7 @@ export const divmod = (numerator, denominator) => {
 
   // If numerator < denominator, div == zero and mod == numerator
   if (lt(numerator, denominator)) {
-    return { div: new ArrayBuffer(), mod: new Uint8Array(new Uint8Array(numerator)).buffer };
+    return { div: new ArrayBuffer(0), mod: new Uint8Array(new Uint8Array(numerator)).buffer };
   }
 
   const numeratorArray = new Uint8Array(numerator);
@@ -432,66 +455,66 @@ export const divmod = (numerator, denominator) => {
   // Long division algorithm (https://en.wikipedia.org/wiki/Division_algorithm#Long_division)
   for (let index = bitLength(numerator); index > 0; index--) {
     leftShiftI(remainderBuffer, 1);
-    remainder[remainder.length - 1] |= numeratorArray[numerator.byteLength - Math.ceil(index / 8)] & (1 << ((index - 1) % 8)) ? 1 : 0;
+    remainder[remainder.length - 1] |= numeratorArray[numerator.byteLength - Math.ceil(index / 8)] & (1 << (index - 1) % 8) ? 1 : 0;
     if (gte(remainderBuffer, denominator)) {
       subI(remainderBuffer, denominator);
-      quotient[quotient.byteLength - Math.ceil(index / 8)] |= 1 << ((index - 1) % 8);
+      quotient[quotient.byteLength - Math.ceil(index / 8)] |= 1 << (index - 1) % 8;
     }
   }
 
   return { div: quotientBuffer, mod: remainderBuffer };
 };
 
-// // Simple bufferUtil tests
-// const a = new Uint8Array([0x00, 0x00, 0x01, 0x01, 0xff, 0xff]).buffer;
-// const b = new Uint8Array([0xff, 0x0f, 0xff]).buffer;
+// Simple bufferUtil tests
+const a = new Uint8Array([0x00, 0x00, 0x01, 0x01, 0xff, 0xff]).buffer;
+const b = new Uint8Array([0xff, 0x0f, 0xff]).buffer;
 
-// console.log(`00000101ffff = ${toHex(a)}`);
-// console.log(`ff0fff = ${toHex(b)}`);
+console.log(`00000101ffff = ${toHex(a)}`);
+console.log(`ff0fff = ${toHex(b)}`);
 
-// console.log(`${eval(`0x${toHex(a)} * 0x${toHex(b)}`)} = ${eval(`0x${toHex(mul(a, b))}`)}`);
+console.log(`${eval(`0x${toHex(a)} * 0x${toHex(b)}`)} = ${eval(`0x${toHex(mul(a, b))}`)}`);
 
-// console.log(`${eval(`0x${toHex(a)} + 0x${toHex(b)}`)} = ${eval(`0x${toHex(add(a, b))}`)}`);
+console.log(`${eval(`0x${toHex(a)} + 0x${toHex(b)}`)} = ${eval(`0x${toHex(add(a, b))}`)}`);
 
-// console.log(`${bitLength(a)} = ${Math.floor(Math.log2(eval(`0x${toHex(a)}`))) + 1}`);
-// console.log(`${bitLength(b)} = ${Math.floor(Math.log2(eval(`0x${toHex(b)}`))) + 1}`);
-// console.log(`${bitLength(new Uint8Array(1).buffer)} = 0`); // Test zero-value buffer
-// console.log(`${bitLength(new Uint8Array(0).buffer)} = 0`); // Test zero-length buffer
+console.log(`${bitLength(a)} = ${Math.floor(Math.log2(eval(`0x${toHex(a)}`))) + 1}`);
+console.log(`${bitLength(b)} = ${Math.floor(Math.log2(eval(`0x${toHex(b)}`))) + 1}`);
+console.log(`${bitLength(new Uint8Array(1).buffer)} = 0`); // Test zero-value buffer
+console.log(`${bitLength(new Uint8Array(0).buffer)} = 0`); // Test zero-length buffer
 
-// console.log(`0101ffff = ${toHex(trim(a))}`);
-// console.log(`ff0fff = ${toHex(trim(b))}`);
+console.log(`0101ffff = ${toHex(trim(a))}`);
+console.log(`ff0fff = ${toHex(trim(b))}`);
 
-// const utf8String = '한글';
-// console.log(`${utf8String} = ${Uint.fromString(utf8String).string}`);
+const utf8String = '한글';
+console.log(`${utf8String} = ${Uint.fromUTF(utf8String).utf}`);
 
-// console.log(`\\x00TEST = ${escape(Uint.fromString('\x00TEST').string).replace('%', '\\x')}`);
+console.log(`\\x00TEST = ${escape(Uint.fromUTF('\x00TEST').utf).replace('%', '\\x')}`);
 
-// console.log(`123ff8 = ${Uint.fromHex('123ff8').hex}`);
+console.log(`123ff8 = ${new Uint('123ff8').hex}`);
 
-// console.log(`${eval(`0x${toHex(b)} * 2`).toString(16)} = ${toHex(leftShift(b))}`);
+console.log(`${eval(`0x${toHex(b)} * 2`).toString(16)} = ${toHex(leftShift(b))}`);
 
-// const e = new Uint8Array([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]).buffer;
+const e = new Uint8Array([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]).buffer;
 
-// console.log(`${eval(`0x${toHex(e)} * 0x${toHex(e)}`)} = ${eval(`0x${toHex(mul(e, e))}`)}`);
+console.log(`${eval(`0x${toHex(e)} * 0x${toHex(e)}`)} = ${eval(`0x${toHex(mul(e, e))}`)}`);
 
-// console.log(`${gt(a, b)} = true`);
-// console.log(`${lte(b, b)} = true`);
-// console.log(`${eq(fromHex('00ab'), fromHex('ab'))} = true`);
-// console.log(`${lt(fromHex('ab'), fromHex('ac'))} = true`);
-// console.log(`${eq(new Uint8Array([0, 0]).buffer, new ArrayBuffer())} = true`);
+console.log(`${gt(a, b)} = true`);
+console.log(`${lte(b, b)} = true`);
+console.log(`${eq(fromHex('00ab'), fromHex('ab'))} = true`);
+console.log(`${lt(fromHex('ab'), fromHex('ac'))} = true`);
+console.log(`${eq(new Uint8Array([0, 0]).buffer, new ArrayBuffer(0))} = true`);
 
-// console.log(`${eval(`0x${toHex(sub(e, e))}`)} = ${eval(`0x${toHex(e)} - 0x${toHex(e)}`)}`);
+console.log(`${eval(`0x${toHex(sub(e, e))}`)} = ${eval(`0x${toHex(e)} - 0x${toHex(e)}`)}`);
 
-// console.log(`${eval(`0x${toHex(sub(a, b))}`)} = ${eval(`0x${toHex(a)} - 0x${toHex(b)}`)}`);
+console.log(`${eval(`0x${toHex(sub(a, b))}`)} = ${eval(`0x${toHex(a)} - 0x${toHex(b)}`)}`);
 
-// try {
-//   sub(b, a);
-//   console.log('bad');
-// } catch (e) {
-//   console.log(e instanceof OverflowError ? 'good' : 'bad');
-// }
+try {
+  sub(b, a);
+  console.log('bad');
+} catch (e) {
+  console.log(e instanceof OverflowError ? 'good' : 'bad');
+}
 
-// let f = leftShift(fromHex('ffffff'), 23);
-// console.log(`${toHex(f)}`);
-// console.log(`${eval(`0x${toHex(a)} / 0x${toHex(b)} | 0`)} = ${eval(`0x${toHex(divmod(a, b).div)}`)}`);
-// console.log(`${eval(`0x${toHex(a)} % 0x${toHex(b)}`)} = ${eval(`0x${toHex(divmod(a, b).mod)}`)}`);
+let f = leftShift(fromHex('ffffff'), 23);
+console.log(`${toHex(f)}`);
+console.log(`${eval(`0x${toHex(a)} / 0x${toHex(b)} | 0`)} = ${eval(`0x${toHex(divmod(a, b).div)}`)}`);
+console.log(`${eval(`0x${toHex(a)} % 0x${toHex(b)}`)} = ${eval(`0x${toHex(divmod(a, b).mod)}`)}`);

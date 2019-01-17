@@ -2,6 +2,11 @@
 dev:
 	docker run -it --rm -v $$PWD:/app -p 5000:5000 ruphin/webdev npm run dev
 
+.PHONY: run
+run:
+	docker run -it --rm -v $$PWD:/app ruphin/deno ./lib/bufferUtil.js
+
+
 .PHONY: shell
 shell:
 	docker run -it --rm -v $$PWD:/app ruphin/webdev bash
