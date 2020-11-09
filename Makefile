@@ -4,7 +4,7 @@ dev:
 
 .PHONY: run
 run:
-	docker run -it --rm -v $$PWD:/app ruphin/deno ./lib/bufferUtil.js
+	docker run -it --rm -v $$PWD:/app ruphin/deno ./lib/BigNum.ts
 
 
 .PHONY: shell
@@ -13,7 +13,7 @@ shell:
 
 .PHONY: test
 test:
-	docker run -it --rm -v $$PWD:/app ruphin/webdev npm run test
+	docker run -it --rm -v $$PWD:/app ruphin/deno ./test/BigNum.ts
 
 .PHONY: build
 build:
