@@ -1,4 +1,4 @@
-import { test, assert, equal } from 'https://deno.land/x/testing/mod.ts';
+import { test, expect } from 'vitest';
 
 import { BigNum } from '../lib/BigNum.ts';
 
@@ -10,27 +10,24 @@ const bufferB = new Uint8Array([0xff, 0x0f, 0xff]).buffer;
 const hexStringB = 'ff0fff';
 const numB = eval(`0x${hexStringB}`);
 
-test({
-  name: 'constructor',
-  fn() {
-    const fromBufferA = new BigNum(bufferA);
-    assert(equal(fromBufferA.buffer, bufferA));
+test('constructor', () => {
+  const fromBufferA = new BigNum(bufferA);
+  expect(fromBufferA.buffer).toEqual(bufferA);
 
-    const fromHexStringA = new BigNum(hexStringA, 16);
-    assert(equal(fromHexStringA.buffer, bufferA));
+  const fromHexStringA = new BigNum(hexStringA, 16);
+  expect(fromHexStringA.buffer).toEqual(bufferA);
 
-    const fromNumA = new BigNum(numA);
-    assert(equal(fromNumA.buffer, bufferA));
+  const fromNumA = new BigNum(numA);
+  expect(fromNumA.buffer).toEqual(bufferA);
 
-    const fromBufferB = new BigNum(bufferA);
-    assert(equal(fromBufferB.buffer, bufferA));
+  const fromBufferB = new BigNum(bufferA);
+  expect(fromBufferB.buffer).toEqual(bufferA);
 
-    const fromHexStringB = new BigNum(hexStringA, 16);
-    assert(equal(fromHexStringB.buffer, bufferA));
+  const fromHexStringB = new BigNum(hexStringA, 16);
+  expect(fromHexStringB.buffer).toEqual(bufferA);
 
-    const fromNumB = new BigNum(numA);
-    assert(equal(fromNumB.buffer, bufferA));
-  }
+  const fromNumB = new BigNum(numA);
+  expect(fromNumB.buffer).toEqual(bufferA);
 });
 
 // tests
